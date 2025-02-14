@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-off-black text-white">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Business Search Tool</title>
+
+    <!-- Include CSS -->
+    <link rel="stylesheet" href="../css/style.css" />
+
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBnXe1a_-Asl9guOmEChKeEqgP3U2L1Jgw&libraries=places,geometry"></script>
+
+    <script>
+      let map, marker, circle, regionPolygon;
+      const categories = [];
+      let allBusinesses = [];
+      let currentPage = 1;
+      const businessesPerPage = 15;
+
+      function initMap() {
+        logToTerminal("Initializing Google Map...");
+        map = new google.maps.Map(document.getElementById("map"), {
+          center: { lat: 40.73061, lng: -73.935242 },
+          zoom: 10,
+        });
+
+        const autocomplete = new google.maps.places.Autocomplete(
+          document.getElementById("location")
+        );
+        autocomplete.bindTo("bounds", map);
+
+        autocomplete.addListener("place_changed", function () {
+          const place = autocomplete.getPlace();
+          if (!place.geometry) return;
+          handleNewPlace(place);
+        });
+
+        map.addListener("click", function (event) {
+          placeMarker(event.latLng);
+        });
+      }
+
+      // Function to handle when a new place is selected from autocomplete
+      function handleNewPlace(place) {
+        const location = place.geometry.location;
+        placeMarker(location);
+
+        const radius = document.getElementById("radius").value;
+        if (radius) {
+          updateCircle(radius);
+        } else {
+          // If no radius is given, highlight the area (country, city, etc.)
+          highlightRegion(place);
+        }
+      }
+
+      // Function to place a marker at the selected location
+      function placeMarker(location) {
+        if (marker) {
+          marker.setPosition(location);
+        } else {
+          marker = new google.maps.Marker({
+            position: location,
+            map: map,
+          });
+        }
+        document.getElementById("location").value =
+          location.lat() + "," + location.lng();
+        clearPreviousHighlights();
+      }
+
+      // Function to update or create the circle for radius
+      function updateCircle(radiusKm) {
+        clearPreviousHighlights(); // Remove any borders when using a radius
+
+        const radius = radiusKm * 1000;
+        if (circle) {
+          circle.setRadius(radius);
+          circle.setCenter(marker.getPosition());
+        } else {
+          circle = new google.maps.Circle({
+            strokeColor: "#1DB954",
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: "#1DB954",
+            fillOpacity: 0.35,
+            map: map,
+            center: marker.getPosition(),
+            radius: radius,
+          });
+        }
+      }
+
+      // Function to highlight a region (city, country, etc.) using bounds
+      function highlightRegion(place) {
+        clearPreviousHighlights();
+
+        if (place.geometry && place.geometry.bounds) {
+          const bounds = place.geometry.bounds;
+
+          const ne = bounds.getNorthEast();
+          const sw = bounds.getSouthWest();
+
+          const polygonCoords = [
+            { lat: sw.lat(), lng: sw.lng() }, // southwest
+            { lat: sw.lat(), lng: ne.lng() }, // southeast
+            { lat: ne.lat(), lng: ne.lng() }, // northeast
+            { lat: ne.lat(), lng: sw.lng() }, // northwest
+          ];
+
+          regionPolygon = new google.maps.Polygon({
+            paths: polygonCoords,
+            strokeColor: "#1DB954",
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: "#1DB954",
+            fillOpacity: 0.35,
+            map: map,
+          });
+
+          map.fitBounds(bounds);
+          document.getElementById("location").value = `${bounds
+            .getCenter()
+            .lat()},${bounds.getCenter().lng()}`;
+        } else {
+          logToTerminal("No boundaries available for this location.");
+        }
+      }
+
+      // Function to clear previous circle or region highlights
+      function clearPreviousHighlights() {
+        if (circle) {
+          circle.setMap(null);
+          circle = null;
+        }
+        if (regionPolygon) {
+          regionPolygon.setMap(null);
+          regionPolygon = null;
+        }
+      }
+
+      // Event listener for search button
+      document.addEventListener("DOMContentLoaded", function () {
+        document
+          .getElementById("radius")
+          .addEventListener("input", function () {
+            const radius = document.getElementById("radius").value;
+            if (radius && marker) {
+              updateCircle(radius);
+            }
+          });
+
+        document
+          .getElementById("search-btn")
+          .addEventListener("click", function () {
+            const locationInput = document.getElementById("location").value;
+            if (locationInput) {
+              const geocoder = new google.maps.Geocoder();
+              geocoder.geocode(
+                { address: locationInput },
+                function (results, status) {
+                  if (status === "OK" && results.length > 0) {
+                    handleNewPlace(results[0]);
+                  } else {
+                    logToTerminal(
+                      "Geocode was not successful for the following reason: " +
+                        status
+                    );
+                  }
+                }
+              );
+            }
+          });
+      });
+
+      document.addEventListener("DOMContentLoaded", function () {
+        document
+          .getElementById("add-category-btn")
+          .addEventListener("click", function () {
+            const category = document
+              .getElementById("business-type")
+              .value.trim();
+            if (category && !categories.includes(category)) {
+              categories.push(category);
+              const categoryList = document.getElementById("category-list");
+              const li = document.createElement("li");
+              li.innerHTML = `${category} <button type="button" class="text-red-500 hover:text-red-700 transition-default">&times;</button>`;
+              li.setAttribute("data-category", category);
+              categoryList.appendChild(li);
+
+              li.querySelector("button").addEventListener("click", function () {
+                categories.splice(categories.indexOf(category), 1);
+                li.remove();
+              });
+            }
+            document.getElementById("business-type").value = "";
+          });
+      });
+
+      // Pagination
+      function renderTable(page) {
+        currentPage = page;
+        const start = (page - 1) * businessesPerPage;
+        const end = start + businessesPerPage;
+        const visibleBusinesses = allBusinesses.slice(start, end);
+
+        const tableBody = document.querySelector("#business-table tbody");
+        tableBody.innerHTML = "";
+
+        visibleBusinesses.forEach((business, index) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td class="border-t border-dark-border p-2 text-white">${business.name}</td>
+            <td class="border-t border-dark-border p-2 text-white">${business.address}</td>
+            <td class="border-t border-dark-border p-2 text-white">${business.phone}</td>
+            <td class="border-t border-dark-border p-2 text-white">${business.website}</td>
+            <td class="border-t border-dark-border p-2 text-white">${business.email}</td>
+            <td class="border-t border-dark-border p-2 text-white">${business.category}</td>
+            <td class="border-t border-dark-border p-2">
+              <button class="delete-btn bg-trans-red border border-red-500 text-red-500 hover:bg-red-500 hover:text-black font-bold py-1 px-2 rounded transition-default">Delete</button>
+            </td>`;
+          tableBody.appendChild(row);
+
+          row
+            .querySelector(".delete-btn")
+            .addEventListener("click", function () {
+              allBusinesses.splice(start + index, 1);
+              renderTable(currentPage);
+            });
+        });
+
+        renderPagination();
+      }
+
+      function renderPagination() {
+        const paginationContainer = document.getElementById("pagination");
+        paginationContainer.innerHTML = "";
+
+        const totalPages = Math.ceil(allBusinesses.length / businessesPerPage);
+        for (let i = 1; i <= totalPages; i++) {
+          const pageBtn = document.createElement("button");
+          pageBtn.innerText = i;
+          pageBtn.className = `bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 px-4 mx-1 rounded ${
+            i === currentPage ? "bg-gray-500" : ""
+          }`;
+          pageBtn.addEventListener("click", function () {
+            renderTable(i);
+          });
+          paginationContainer.appendChild(pageBtn);
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        document.getElementById("search-form").onsubmit = async function (
+          event
+        ) {
+          event.preventDefault();
+          logToTerminal("Processing search request...");
+          document.getElementById("loading").classList.remove("hidden");
+
+          const location = document.getElementById("location").value;
+          const radiusKm = document.getElementById("radius").value;
+          const radius = radiusKm ? radiusKm * 1000 : null; // Use the radius if provided, otherwise null
+          const website_filter =
+            document.getElementById("website-filter").value;
+          const categoriesToSend = categories.length > 0 ? categories : ["any"];
+
+          const formData = new FormData();
+          formData.append("location", location);
+          formData.append("radius", radius);
+          formData.append("categories", JSON.stringify(categoriesToSend));
+          formData.append("website_filter", website_filter);
+
+          document.getElementById("business-table").classList.add("hidden");
+
+          try {
+            const response = await fetch("/search", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!response.ok) {
+              const errorMessage = await response.text();
+              logToTerminal(`Error ${response.status}: ${errorMessage}`);
+              throw new Error(errorMessage);
+            }
+
+            const data = await response.json();
+            logToTerminal("Success! Data received from the server.");
+            document.getElementById("loading").classList.add("hidden");
+
+            allBusinesses = data.businesses;
+            renderTable(1);
+            document
+              .getElementById("business-table")
+              .classList.remove("hidden");
+
+            // Update business count at the top of the table
+            document.getElementById(
+              "business-count"
+            ).textContent = `Businesses Found: ${data.count}`;
+          } catch (error) {
+            document.getElementById("loading").classList.add("hidden");
+            logToTerminal("Error: " + error.message);
+          }
+        };
+      });
+
+      function logToTerminal(message) {
+        const logContent = document.getElementById("log-terminal");
+        logContent.textContent += message + "\n";
+      }
+
+      // Download Excel File
+      document.addEventListener("DOMContentLoaded", function () {
+        document
+          .getElementById("download-btn")
+          .addEventListener("click", function () {
+            window.location.href = "/download";
+          });
+      });
+
+      window.onload = initMap;
+    </script>
+
+    <style>
+      @layer utilities {
+        .transition-default {
+          transition: all 0.3s ease;
+        }
+      }
+    </style>
+  </head>
+
+  <body class="font-sans bg-off-black">
+    <div class="max-w-[1400px] mx-auto px-4 py-8">
+      <header class="text-center pb-5 mb-8 border-b border-subtle-gray">
+        <h1 class="text-4xl font-bold text-white">Business Search Tool</h1>
+      </header>
+
+      <div class="flex flex-col lg:flex-row gap-8 mb-8">
+        <section
+          class="bg-modern-bg p-8 rounded-lg border border-subtle-gray shadow-lg lg:w-2/5"
+        >
+          <form id="search-form">
+            <div class="mb-6">
+              <label
+                for="location"
+                class="block text-sm uppercase text-gray-400 mb-2"
+                >Select Location</label
+              >
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  id="location"
+                  class="flex-grow bg-off-black border border-dark-border rounded-md p-2 text-white placeholder-gray-400"
+                />
+                <button
+                  type="button"
+                  id="search-btn"
+                  class="bg-trans-green border border-green-500 text-green-500 hover:bg-green-500 hover:text-black font-bold py-2 px-4 rounded"
+                >
+                  Search
+                </button>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <label
+                for="radius"
+                class="block text-sm uppercase text-gray-400 mb-2"
+                >Search Radius (in kilometers)</label
+              >
+              <input
+                type="number"
+                id="radius"
+                class="w-full bg-off-black border border-dark-border rounded-md p-2 text-white placeholder-gray-400"
+              />
+            </div>
+
+            <div class="mb-6">
+              <label
+                for="business-type"
+                class="block text-sm uppercase text-gray-400 mb-2"
+                >Business Type</label
+              >
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  id="business-type"
+                  class="flex-grow bg-off-black border border-dark-border rounded-md p-2 text-white placeholder-gray-400"
+                />
+                <button
+                  type="button"
+                  id="add-category-btn"
+                  class="bg-trans-green border border-green-500 text-green-500 hover:bg-green-500 hover:text-black font-bold py-2 px-4 rounded"
+                >
+                  Add Category
+                </button>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <label class="block text-sm uppercase text-gray-400 mb-2"
+                >Selected Categories</label
+              >
+              <ul
+                id="category-list"
+                class="bg-off-black border border-dark-border rounded-md p-2"
+              ></ul>
+            </div>
+
+            <div class="mb-6">
+              <label
+                for="website-filter"
+                class="block text-sm uppercase text-gray-400 mb-2"
+                >Filter by Website</label
+              >
+              <select
+                id="website-filter"
+                class="w-full bg-off-black border border-dark-border rounded-md p-2 text-white"
+              >
+                <option value="all">All Businesses</option>
+                <option value="without">Without Website or Social Media</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              class="w-full bg-trans-green border border-green-500 text-green-500 hover:bg-green-500 hover:text-black font-bold py-3 px-4 rounded"
+            >
+              Search
+            </button>
+          </form>
+        </section>
+
+        <section class="lg:w-3/5">
+          <div
+            id="map"
+            class="h-[600px] w-full border border-subtle-gray rounded-lg bg-modern-bg shadow-lg"
+          ></div>
+        </section>
+      </div>
+
+      <div class="max-w-[1200px] mx-auto">
+        <div id="loading" class="text-center my-8 hidden">
+          <p class="text-xl font-bold text-white">Loading... Please wait</p>
+        </div>
+
+        <!-- Results Section -->
+        <section
+          class="my-8 bg-modern-bg border border-subtle-gray rounded-lg shadow-lg overflow-hidden"
+        >
+          <p id="business-count" class="text-xl font-bold text-white"></p>
+          <table id="business-table" class="w-full border-collapse hidden">
+            <thead>
+              <tr class="bg-subtle-gray">
+                <th class="p-2 text-left text-white">Name</th>
+                <th class="p-2 text-left text-white">Address</th>
+                <th class="p-2 text-left text-white">Phone</th>
+                <th class="p-2 text-left text-white">Website</th>
+                <th class="p-2 text-left text-white">Email</th>
+                <th class="p-2 text-left text-white">Category</th>
+                <th class="p-2 text-left text-white">Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
+        <!-- Pagination -->
+        <div id="pagination" class="flex justify-center"></div>
+
+        <section class="mb-8">
+          <button
+            id="download-btn"
+            class="bg-trans-green border border-green-500 text-green-500 hover:bg-green-500 hover:text-black font-bold py-2 px-4 rounded"
+          >
+            Download Excel File
+          </button>
+        </section>
+
+        <section>
+          <div
+            id="log-terminal"
+            class="bg-black p-4 rounded-lg h-[200px] overflow-y-auto font-mono text-sm text-terminal-green border border-subtle-gray shadow-lg"
+          ></div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>
