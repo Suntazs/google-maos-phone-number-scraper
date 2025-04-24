@@ -6,9 +6,9 @@ from io import BytesIO
 import json
 
 app = Flask(__name__)
-app.secret_key = 'AIzaSyBnXe1a_-Asl9guOmEChKeEqgP3U2L1Jgw'  # Required for session handling
+app.secret_key = ''  # Required for session handling
 
-API_KEY = "AIzaSyBnXe1a_-Asl9guOmEChKeEqgP3U2L1Jgw"  # Replace with your actual Google API key
+API_KEY = ""  # Replace with your actual Google API key
 
 
 # Serve CSS files from /css directory
